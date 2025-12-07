@@ -1,0 +1,83 @@
+# ------------------------------------------------------------
+# HunyuanWorld-Mirror (Stable 5090 Edition)
+# Base: Ubuntu 24.04 | CUDA 12.8 | Target Python: 3.10
+# ------------------------------------------------------------
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# 1. System Dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    git \
+    build-essential \
+    software-properties-common \
+    gnupg2 \
+    cmake \
+    ninja-build \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Install NVIDIA CUDA Toolkit 12.8
+# We use the network installer for Ubuntu 24.04
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    rm cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y cuda-toolkit-12-8 && \
+    rm -rf /var/lib/apt/lists/*
+
+# 3. Install Python 3.10 via Deadsnakes PPA (since Ubuntu 24.04 has 3.12)
+RUN add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y \
+    python3.10 \
+    python3.10-dev \
+    python3.10-venv \
+    python3.10-distutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# 4. Install pip for Python 3.10
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10
+
+# Set python3.10 and its pip as the default system aliases
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+RUN update-alternatives --install /usr/bin/pip3 pip3 /usr/local/bin/pip3.10 100 || update-alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.10 100
+
+WORKDIR /workspace
+
+# 5. Install PyTorch (CUDA 12.6/12.8 Compatible)
+# Note: PyTorch nightly might be needed for CUDA 12.8, or use 12.6 build which works on 12.8 driver
+RUN pip3 install --upgrade pip
+RUN pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu126
+
+# 6. Clone Repository
+RUN git clone https://github.com/Tencent-Hunyuan/HunyuanWorld-Mirror.git
+
+WORKDIR /workspace/HunyuanWorld-Mirror
+
+# 7. Loosen Requirements (Unpin Torch)
+RUN sed -i '/torch==/d' requirements.txt && \
+    sed -i '/torchvision==/d' requirements.txt
+
+# 8. Install Dependencies
+RUN pip3 install -r requirements.txt
+RUN pip3 install -r requirements_demo.txt
+
+# 9. Build gsplat from source
+ENV TORCH_CUDA_ARCH_LIST="12.0"
+RUN pip3 install git+https://github.com/nerfstudio-project/gsplat.git
+
+# 10. (Optional) HuggingFace CLI
+RUN pip3 install "huggingface_hub[cli]"
+
+# 11. Runtime Environment
+ENV TORCH_CUDA_ARCH_LIST="12.0"
+
+CMD ["python3", "app.py"]

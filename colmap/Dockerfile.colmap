@@ -1,0 +1,61 @@
+# ------------------------------------------------------------
+# COLMAP 3.13 + CUDA 12.8 + Ubuntu 24.04
+# Optimized for RTX 5090 (sm_120)
+# ------------------------------------------------------------
+ARG UBUNTU_VERSION=24.04
+ARG NVIDIA_CUDA_VERSION=12.8.0
+
+FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+
+ARG CUDA_ARCH=120
+ENV DEBIAN_FRONTEND=noninteractive
+ENV QT_XCB_GL_INTEGRATION=xcb_glx
+ENV LC_ALL=C
+
+# 1) Install Dependencies (Includes libopencv-dev fix)
+RUN apt-get update && apt-get install -y \
+    build-essential git cmake ninja-build \
+    libboost-program-options-dev libboost-filesystem-dev \
+    libboost-graph-dev libboost-system-dev libboost-test-dev \
+    libeigen3-dev libsuitesparse-dev libmetis-dev \
+    libcgal-dev libceres-dev \
+    libfreeimage-dev libopenimageio-dev openimageio-tools \
+    libgoogle-glog-dev libgflags-dev libgtest-dev \
+    libgmock-dev libsqlite3-dev libglew-dev \
+    qt6-base-dev libqt6opengl6-dev libqt6openglwidgets6 \
+    libcurl4-openssl-dev libssl-dev \
+    libmkl-full-dev \
+    python3 python3-pip python3-dev python-is-python3 \
+    libopencv-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Fix for OpenImageIO/OpenCV
+RUN mkdir -p /usr/include/opencv4
+
+# 2) Build COLMAP (Stable v3.13.0)
+WORKDIR /tmp_build
+RUN git clone https://github.com/colmap/colmap.git
+WORKDIR /tmp_build/colmap
+RUN git checkout 3.13.0
+
+RUN mkdir build && cd build && \
+    cmake .. -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCUDA_ENABLED=ON \
+        -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
+        -DBLA_VENDOR=Intel10_64lp \
+        -DOPENIMAGEIO_ENABLED=ON \
+        -DFREEIMAGE_ENABLED=OFF \
+        -DTESTS_ENABLED=OFF \
+        -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+    && ninja && ninja install && \
+    ldconfig
+
+# 3) Runtime Setup
+WORKDIR /workspace
+# Copy script into container and make executable
+COPY run.sh /usr/local/bin/run_colmap
+RUN chmod +x /usr/local/bin/run_colmap
+
+# Keep container running so you can enter it manually
+CMD ["tail", "-f", "/dev/null"]
