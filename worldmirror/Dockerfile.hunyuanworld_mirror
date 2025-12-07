@@ -1,0 +1,55 @@
+# ------------------------------------------------------------
+# HunyuanWorld-Mirror + CUDA 12.8 + Ubuntu 22.04 (RTX 5090 / sm_120)
+# ------------------------------------------------------------
+ARG UBUNTU_VERSION=22.04
+ARG NVIDIA_CUDA_VERSION=12.8.0
+
+FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+
+ARG CUDA_ARCH=12.0
+ARG TORCH_CUDA_ARCH_LIST="12.0+PTX"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    QT_XCB_GL_INTEGRATION=xcb_glx \
+    LC_ALL=C \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    PIP_BREAK_SYSTEM_PACKAGES=1
+
+# 1) System deps (Ubuntu 22.04: python3 = 3.10)
+RUN apt-get update && apt-get install -y \
+    build-essential git cmake ninja-build curl wget \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    python3 python3-pip python3-dev python-is-python3 \
+    ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+# 2) PyTorch nightly for CUDA 12.8 (no pip upgrade!)
+RUN python3 -m pip install --pre torch torchvision torchaudio \
+      --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# 3) HunyuanWorld-Mirror + deps
+WORKDIR /tmp_build
+RUN git clone https://github.com/Tencent-Hunyuan/HunyuanWorld-Mirror.git
+WORKDIR /tmp_build/HunyuanWorld-Mirror
+
+# open3d==0.18.0 is not available for some Python builds; 0.19.0 is.
+# Patch BOTH requirements.txt and requirements_demo.txt, then install.
+RUN sed -i 's/open3d==0.18.0/open3d==0.19.0/' requirements.txt requirements_demo.txt \
+ && python3 -m pip install --no-cache-dir -r requirements.txt \
+ && python3 -m pip install --no-cache-dir -r requirements_demo.txt \
+ && python3 -m pip install --no-cache-dir "huggingface_hub[cli]" \
+ && python3 -m pip install --no-cache-dir gsplat --index-url https://docs.gsplat.studio/whl/pt24cu124
+
+# (Optional) Pre-download model weights into the image:
+# RUN python3 -m huggingface_hub download tencent/HunyuanWorld-Mirror --local-dir ./ckpts
+
+# 4) Runtime setup
+WORKDIR /workspace
+
+# Helper script: one-liner to launch the Gradio demo
+RUN printf '#!/bin/bash\ncd /tmp_build/HunyuanWorld-Mirror\npython3 app.py \"$@\"\n' \
+    > /usr/local/bin/run_hunyuanworld_mirror && \
+    chmod +x /usr/local/bin/run_hunyuanworld_mirror
+
+# Default: idle container, you exec in and run what you want
+CMD ["tail", "-f", "/dev/null"]

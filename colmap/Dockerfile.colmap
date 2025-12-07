@@ -1,18 +1,21 @@
 # ------------------------------------------------------------
-# COLMAP 3.13 + CUDA 12.8 + Ubuntu 24.04
-# Optimized for RTX 5090 (sm_120)
+# COLMAP 3.13 + CUDA 12.2 + Ubuntu 22.04 (Golden Standard)
 # ------------------------------------------------------------
-ARG UBUNTU_VERSION=24.04
-ARG NVIDIA_CUDA_VERSION=12.8.0
+# We switch to 22.04 to ensure library stability (Eigen/Boost/GCC)
+ARG UBUNTU_VERSION=22.04
+ARG NVIDIA_CUDA_VERSION=12.2.0
 
 FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 
-ARG CUDA_ARCH=120
+# RTX 5090 support (sm_90 is the safest fallback for Blackwell on older toolkits)
+# We use 90 to ensure absolute stability on this OS version.
+ARG CUDA_ARCH=90
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV QT_XCB_GL_INTEGRATION=xcb_glx
 ENV LC_ALL=C
 
-# 1) Install Dependencies (Includes libopencv-dev fix)
+# 1) Install Dependencies (Ubuntu 22.04 names)
 RUN apt-get update && apt-get install -y \
     build-essential git cmake ninja-build \
     libboost-program-options-dev libboost-filesystem-dev \
@@ -32,7 +35,7 @@ RUN apt-get update && apt-get install -y \
 # Fix for OpenImageIO/OpenCV
 RUN mkdir -p /usr/include/opencv4
 
-# 2) Build COLMAP (Stable v3.13.0)
+# 2) Build COLMAP (v3.13.0 Stable)
 WORKDIR /tmp_build
 RUN git clone https://github.com/colmap/colmap.git
 WORKDIR /tmp_build/colmap
@@ -53,9 +56,8 @@ RUN mkdir build && cd build && \
 
 # 3) Runtime Setup
 WORKDIR /workspace
-# Copy script into container and make executable
+# Copy the script to a global location
 COPY run.sh /usr/local/bin/run_colmap
 RUN chmod +x /usr/local/bin/run_colmap
 
-# Keep container running so you can enter it manually
 CMD ["tail", "-f", "/dev/null"]
