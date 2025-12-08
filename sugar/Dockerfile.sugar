@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # 1) System Dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential git cmake ninja-build curl wget \
+    build-essential git cmake ninja-build curl wget vim nano zsh openssh-server \
     libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
     python3 python3-pip python3-dev python-is-python3 \
     ffmpeg \
@@ -50,7 +50,11 @@ RUN python3 -m pip install --no-build-isolation .
 
 # B. simple-knn (PATCHED)
 WORKDIR /workspace/SuGaR/gaussian_splatting/submodules/simple-knn
+<<<<<<< HEAD
 # --- THE FIX: Inject <cfloat> to define FLT_MAX ---
+=======
+# Fix FLT_MAX undefined error in CUDA 12.8
+>>>>>>> 7c9cdce (feat: add new 3d mapping frameworks)
 RUN sed -i '1i #include <cfloat>' simple_knn.cu
 RUN python3 -m pip install --no-build-isolation .
 
@@ -58,11 +62,15 @@ RUN python3 -m pip install --no-build-isolation .
 WORKDIR /tmp_build
 RUN git clone https://github.com/NVlabs/nvdiffrast && \
     cd nvdiffrast && \
-    python3 -m pip install .
+    python3 -m pip install --no-build-isolation .
 
-# 8) Final Setup
+# 8) Final Setup & Hotfixes
 WORKDIR /workspace/SuGaR
 RUN mkdir -p output
+
+# --- FIX: Patch SuGaR for PyTorch 2.6+ 'weights_only' security issue ---
+# This allows loading checkpoints containing numpy arrays
+RUN find . -type f -name "*.py" -print0 | xargs -0 sed -i 's/torch.load(\([^)]*\))/torch.load(\1, weights_only=False)/g'
 
 COPY run_sugar.sh /usr/local/bin/run_sugar
 RUN chmod +x /usr/local/bin/run_sugar

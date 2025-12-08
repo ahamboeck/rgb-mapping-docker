@@ -1,0 +1,29 @@
+services:
+  mast3r-slam:
+    build:
+      context: .
+      dockerfile: Dockerfile.mast3r_slam
+    image: vision_lab/mast3r-slam:cuda12.8-torch-nightly
+    container_name: mast3r_slam_5090
+    runtime: nvidia
+    network_mode: host
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
+      - DISPLAY=${DISPLAY}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - FORCE_CUDA=1
+      - TORCH_CUDA_ARCH_LIST=8.6;8.9;9.0;12.0+PTX
+    volumes:
+      - ../../MASt3R-SLAM:/workspace/MASt3R-SLAM
+      - ../datasets:/workspace/datasets
+      - ../output:/workspace/output
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    command: tail -f /dev/null
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
