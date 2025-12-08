@@ -1,0 +1,62 @@
+# ------------------------------------------------------------
+# MASt3R + CUDA 12.8 + Ubuntu 24.04 (RTX 5090 / sm_120)
+# ------------------------------------------------------------
+ARG UBUNTU_VERSION=24.04
+ARG NVIDIA_CUDA_VERSION=12.8.0
+
+FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+
+ARG CUDA_ARCH=12.0
+ARG TORCH_CUDA_ARCH_LIST="12.0+PTX"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    QT_XCB_GL_INTEGRATION=xcb_glx \
+    LC_ALL=C \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    DEVICE=cuda
+
+# 1) System deps
+RUN apt-get update && apt-get install -y \
+    build-essential git cmake ninja-build curl wget \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    python3 python3-pip python3-dev python-is-python3 \
+    ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+# 2) PyTorch nightly for CUDA 12.8
+RUN python3 -m pip install --pre torch torchvision torchaudio \
+      --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# 3) MASt3R + deps
+WORKDIR /tmp_build
+RUN git clone --recursive https://github.com/naver/mast3r.git
+WORKDIR /tmp_build/mast3r
+
+# Install dependencies
+# dust3r deps + mast3r deps
+RUN python3 -m pip install \
+    numpy matplotlib opencv-python \
+    scipy einops trimesh tensorboard \
+    "pyglet<2" "huggingface-hub[torch]>=0.22" \
+    scikit-learn roma \
+    tqdm
+
+# Build curope extension (part of dust3r)
+WORKDIR /tmp_build/mast3r/dust3r/croco/models/curope/
+RUN python3 setup.py build_ext --inplace
+
+# Install mast3r/dust3r as package or just set pythonpath?
+# The original dockerfile just installs requirements.
+# We might need to add it to PYTHONPATH or install it.
+# Let's install requirements from the repo just in case we missed something, 
+# but we already installed most.
+WORKDIR /tmp_build/mast3r
+RUN python3 -m pip install -r requirements.txt
+RUN python3 -m pip install -r dust3r/requirements.txt
+
+# 4) Runtime setup
+WORKDIR /workspace
+ENV PYTHONPATH="${PYTHONPATH}:/tmp_build/mast3r"
+
+CMD ["/bin/bash"]

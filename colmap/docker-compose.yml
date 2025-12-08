@@ -1,24 +1,24 @@
 services:
-  map_anything:
+  colmap:
     build:
       context: .
-      dockerfile: Dockerfile.map_anything
-    image: vision_lab/map_anything:cuda12.8-5090-sm120
-    container_name: map_anything_5090
+      dockerfile: Dockerfile.colmap
+    image: vision_lab/colmap:cuda12.8-5090-sm120
+    container_name: colmap_5090
     runtime: nvidia
-    network_mode: host
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+      # Ensure graphics capability is explicitly requested for GUI apps
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
       - DISPLAY=${DISPLAY}
+      # The Fix: Force GLX for NVIDIA container GUI
       - QT_XCB_GL_INTEGRATION=xcb_glx
+      # Prevent shared memory issues with X11
       - QT_X11_NO_MITSHM=1
-      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-      - GRADIO_SERVER_NAME=0.0.0.0
-      - GRADIO_SERVER_PORT=7860
     volumes:
       - ../datasets:/workspace/datasets
       - ../thirdparty:/workspace/thirdparty
+      - ../output:/workspace/output
       - /tmp/.X11-unix:/tmp/.X11-unix
     command: tail -f /dev/null
     deploy:

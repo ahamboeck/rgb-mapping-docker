@@ -14,7 +14,8 @@ fi
 # 2. Derive Parent Directory (Where outputs will go)
 # Removes trailing slash if present, then gets directory name
 CLEAN_PATH=${INPUT_IMAGE_PATH%/}
-PROJECT_PATH=$(dirname "$CLEAN_PATH")
+# PROJECT_PATH=$(dirname "$CLEAN_PATH")
+PROJECT_PATH="/workspace/output"
 
 echo "============================================================"
 echo " Project Path:   ${PROJECT_PATH}"

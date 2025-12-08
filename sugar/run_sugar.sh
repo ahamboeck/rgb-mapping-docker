@@ -35,7 +35,12 @@ python3 train_full_pipeline.py \
 # Note: "short" refinement is usually sufficient and takes a few minutes.
 # Use "long" for maximum quality (takes significantly longer).
 
+# Move output to shared volume
+echo "Moving output to /workspace/output..."
+mkdir -p /workspace/output
+cp -r /workspace/SuGaR/output/* /workspace/output/
+
 echo "============================================================"
 echo " JOB FINISHED"
-echo " Check /workspace/SuGaR/output/ for .obj and .ply files"
+echo " Check /workspace/output/ for .obj and .ply files"
 echo "============================================================"

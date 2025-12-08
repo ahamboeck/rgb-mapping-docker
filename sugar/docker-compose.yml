@@ -14,7 +14,7 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     volumes:
       - ../datasets:/workspace/datasets
-      - ./sugar_output:/workspace/SuGaR/output
+      - ../output:/workspace/output
       - /tmp/.X11-unix:/tmp/.X11-unix
     command: tail -f /dev/null
     deploy:

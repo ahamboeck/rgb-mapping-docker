@@ -26,11 +26,10 @@ RUN python3 -m pip install --upgrade pip && \
     python3 -m pip install --pre torch torchvision torchaudio \
       --index-url https://download.pytorch.org/whl/nightly/cu128
 
-# 3) Install PyTorch3D (Fix: Disable Build Isolation)
+# 3) Install PyTorch3D (Build from source with NO build isolation)
 WORKDIR /tmp_build
 RUN git clone https://github.com/facebookresearch/pytorch3d.git && \
     cd pytorch3d && \
-    # --no-build-isolation lets the build see the installed PyTorch
     python3 -m pip install --no-build-isolation .
 
 # 4) Install Common Python Deps
@@ -44,11 +43,15 @@ RUN python3 -m pip install \
 WORKDIR /workspace
 RUN git clone https://github.com/Anttwo/SuGaR.git --recursive
 
-# 6) Compile SuGaR Submodules (Fix: Disable Build Isolation here too)
+# 6) Compile SuGaR Submodules
+# A. diff-gaussian-rasterization
 WORKDIR /workspace/SuGaR/gaussian_splatting/submodules/diff-gaussian-rasterization
 RUN python3 -m pip install --no-build-isolation .
 
+# B. simple-knn (PATCHED)
 WORKDIR /workspace/SuGaR/gaussian_splatting/submodules/simple-knn
+# --- THE FIX: Inject <cfloat> to define FLT_MAX ---
+RUN sed -i '1i #include <cfloat>' simple_knn.cu
 RUN python3 -m pip install --no-build-isolation .
 
 # 7) Install Nvdiffrast
