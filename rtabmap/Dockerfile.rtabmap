@@ -1,0 +1,17 @@
+FROM introlab3it/rtabmap:jammy
+
+# Install Python and basic tools
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-dev \
+    git vim nano \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies for helper scripts
+RUN pip3 install numpy opencv-python pyyaml
+
+WORKDIR /workspace
+
+COPY run.sh /workspace/run.sh
+RUN chmod +x /workspace/run.sh
+
+CMD ["tail", "-f", "/dev/null"]

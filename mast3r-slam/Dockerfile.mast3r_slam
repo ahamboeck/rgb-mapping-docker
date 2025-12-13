@@ -4,61 +4,78 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 
-# Install system dependencies
+# 1. Install System Dependencies (CACHED)
 RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    wget \
-    vim \
-    zsh \
-    cmake \
-    build-essential \
-    python3.11 \
-    python3.11-dev \
-    python3-pip \
-    python3.11-venv \
-    libgl1-mesa-glx \
-    ninja-build \
-    libglib2.0-0 \
-    openssh-server \
+    git curl wget vim zsh cmake build-essential \
+    python3.11 python3.11-dev python3-pip python3.11-venv \
+    libgl1-mesa-glx ninja-build libglib2.0-0 openssh-server \
+    libsdl2-dev libxi-dev libxcursor-dev libxinerama-dev \
+    libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set python3.11 as default
+# Set python3.11 as default (CACHED)
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
+    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
+    pip install --upgrade pip setuptools wheel
 
-# Upgrade pip
-RUN pip install --upgrade pip
+# Download Models (CACHEABLE STEP)
+# We do this early so it doesn't re-run if we change the code/patches below.
+WORKDIR /opt/mast3r_checkpoints
+RUN wget https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth
+RUN wget https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth
+RUN wget https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_codebook.pkl
 
-# Install PyTorch Nightly for CUDA 12.8 (RTX 5090 support)
+# 2. Install PyTorch Nightly (CACHED)
 RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 
-# Install dependencies from MASt3R-SLAM pyproject.toml
-RUN pip install numpy==1.26.4 einops pyrealsense2 evo natsort plyfile
+# 3. Install Python Dependencies (CACHED)
+RUN pip install "Cython<3"
+RUN pip install numpy==1.26.4 einops pyrealsense2 evo natsort plyfile \
+    scipy matplotlib opencv-python trimesh tensorboard huggingface_hub faiss-cpu scikit-learn pyaml \
+    gradio pyglet roma torchcodec
 
-# Install common dependencies for MASt3R/Dust3r
-RUN pip install scipy matplotlib opencv-python trimesh tensorboard huggingface_hub
+RUN pip install imgui
 
-# Install Eigen (required for lietorch)
+# =============================================================================
+# CRITICAL FIXES FOR COMPILATION
+# These MUST be set before compiling Lietorch/MASt3R-SLAM.
+# =============================================================================
+
+# 1. Target Architecture for RTX 5090 (Blackwell)
+# Using the list recommended by BenUCL fork for sm_120 support
+ENV TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;12.0"
+
+# 2. Force CUDA compilation
+ENV FORCE_CUDA="1"
+
+# =============================================================================
+
+# 4. Install Eigen & Lietorch (CACHED if you built the previous step successfully)
 WORKDIR /tmp_build
-RUN git clone https://gitlab.com/libeigen/eigen.git
-RUN cd eigen && mkdir build && cd build && cmake .. && make install
-# Symlink Eigen to where lietorch expects it (often /usr/include/eigen3)
-RUN ln -s /usr/local/include/eigen3/Eigen /usr/local/include/Eigen
+RUN git clone https://gitlab.com/libeigen/eigen.git && \
+    cd eigen && mkdir build && cd build && cmake .. && make install && \
+    ln -s /usr/local/include/eigen3/Eigen /usr/local/include/Eigen
 
-# Install lietorch
 WORKDIR /tmp_build
-RUN git clone https://github.com/princeton-vl/lietorch.git
-WORKDIR /tmp_build/lietorch
-# Fix missing Eigen include path in setup.py if needed, or rely on system install
-# Force CUDA architecture flags to avoid auto-detection failure in Docker build
-ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
-RUN python setup.py install
+RUN git clone https://github.com/princeton-vl/lietorch.git && \
+    cd lietorch && python setup.py install
 
-# Install Oh My Zsh
-RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-
+# 5. Clone MASt3R-SLAM (BenUCL Fork for Blackwell Support)
 WORKDIR /workspace
+RUN git clone --recursive https://github.com/BenUCL/MASt3R-SLAM.git
 
-CMD ["/bin/zsh"]
+# -----------------------------------------------------------------------------
+# 6. Install
+# -----------------------------------------------------------------------------
+
+# PATCH: Force setup.py to assume CUDA is available (Docker build often hides GPU)
+RUN sed -i 's/torch.cuda.is_available()/True/g' /workspace/MASt3R-SLAM/setup.py
+
+WORKDIR /workspace/MASt3R-SLAM
+RUN pip install --no-build-isolation thirdparty/mast3r
+RUN pip install --no-build-isolation thirdparty/in3d
+RUN pip install --no-build-isolation .
+
+WORKDIR /workspace/MASt3R-SLAM
+CMD ["/bin/bash"]

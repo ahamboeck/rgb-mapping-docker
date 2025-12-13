@@ -44,7 +44,31 @@ Real-Time Dense SLAM with 3D Reconstruction Priors.
     ./run.sh python main.py --config config/euroc.yaml ...
     ```
 
-### 2. FastVGGT
+### 2. Azure Kinect Recorder & Converter
+Tools for recording MKV datasets with Azure Kinect and converting them for SLAM/Mapping.
+- **Location**: `kinect/`
+- **Setup**:
+    1. Copy udev rules to host (one time setup):
+       ```bash
+       sudo cp kinect/99-k4a.rules /etc/udev/rules.d/
+       sudo udevadm control --reload-rules && sudo udevadm trigger
+       ```
+    2. Build container:
+       ```bash
+       cd kinect
+       ./run.sh build
+       ```
+- **Usage**:
+    ```bash
+    ./run.sh run
+    # Inside container:
+    k4aviewer                  # Open Viewer GUI
+    ./scripts/record_wide.sh   # Record Wide FOV
+    ./scripts/record_narrow.sh # Record Narrow FOV
+    python3 scripts/convert_kinect.py output/recording.mkv output/extracted_data
+    ```
+
+### 3. FastVGGT
 Training-Free Acceleration of Visual Geometry Transformer.
 - **Location**: `fastvggt/`
 - **Setup**:

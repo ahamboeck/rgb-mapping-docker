@@ -1,31 +1,22 @@
 services:
-  mast3r-slam:
+  rtabmap:
     build:
       context: .
-      dockerfile: Dockerfile.mast3r_slam
-    image: vision_lab/mast3r-slam:cuda12.8-torch-nightly
-    container_name: mast3r_slam_5090
+      dockerfile: Dockerfile.rtabmap
+    image: vision_lab/rtabmap:jammy
+    container_name: rtabmap
     runtime: nvidia
     network_mode: host
-    shm_size: 32gb
-    cap_add:
-      - SYS_PTRACE
-    security_opt:
-      - seccomp:unconfined
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
       - DISPLAY=${DISPLAY}
-      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-      - FORCE_CUDA=1
-      - TORCH_CUDA_ARCH_LIST=8.6;8.9;9.0;12.0+PTX
+      - QT_X11_NO_MITSHM=1
     volumes:
-      - ../../MASt3R-SLAM:/workspace/MASt3R-SLAM
-      - ./scripts:/workspace/scripts
       - ../datasets:/workspace/datasets
       - ../output:/workspace/output
-      - ../thirdparty:/workspace/thirdparty
       - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./scripts:/workspace/scripts
     command: tail -f /dev/null
     deploy:
       resources:

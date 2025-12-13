@@ -1,0 +1,65 @@
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# 1. Install System Dependencies
+RUN apt-get update && apt-get install -y \
+    git curl wget vim zsh cmake build-essential \
+    python3.11 python3.11-dev python3-pip python3.11-venv \
+    libgl1-mesa-glx ninja-build libglib2.0-0 openssh-server \
+    libsdl2-dev libxi-dev libxcursor-dev libxinerama-dev \
+    libusb-1.0-0 libboost-all-dev unzip ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set python3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && \
+    pip install --upgrade pip setuptools wheel
+
+# 2. Install PyTorch Nightly (CUDA 12.8)
+RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# 3. Clone VGGT-SLAM
+WORKDIR /workspace
+RUN git clone https://github.com/MIT-SPARK/VGGT-SLAM.git
+
+# 4. Install Dependencies
+WORKDIR /workspace/VGGT-SLAM
+
+# Remove torch/torchvision from requirements.txt to avoid downgrading
+# We use ^torch to only match lines starting with torch (like torch==, torchvision==)
+# and avoid matching pytorch-lightning or pytorch_metric_learning
+RUN sed -i '/^torch/d' requirements.txt
+
+# Install base requirements
+RUN pip install -r requirements.txt && \
+    pip install pytorch-lightning
+
+# Clone and install Salad
+RUN git clone https://github.com/Dominic101/salad.git && \
+    pip install -e ./salad
+
+# Clone and install VGGT
+# We need to be careful if VGGT requires specific torch version in its setup.py
+RUN git clone https://github.com/facebookresearch/vggt.git && \
+    sed -i '/torch/d' vggt/requirements.txt || true && \
+    pip install -e ./vggt
+
+# Install current repo
+RUN pip install -e .
+
+# Patch main.py to save point cloud as PLY
+RUN sed -i 's/# solver.map.write_points_to_file(args.log_path.replace(".txt", "_points.pcd"))/solver.map.write_points_to_file(args.log_path.replace(".txt", "_points.ply"))/g' main.py
+
+# Environment variables for CUDA
+ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0;12.0"
+ENV FORCE_CUDA="1"
+
+# Create a run script or entrypoint if needed
+COPY run.sh /workspace/run.sh
+RUN chmod +x /workspace/run.sh
+
+CMD ["/bin/bash"]

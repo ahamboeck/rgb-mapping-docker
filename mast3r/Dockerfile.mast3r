@@ -1,13 +1,7 @@
 # ------------------------------------------------------------
-<<<<<<< HEAD
-# MASt3R + CUDA 12.8 + Ubuntu 24.04 (RTX 5090 / sm_120)
-# ------------------------------------------------------------
-ARG UBUNTU_VERSION=24.04
-=======
 # MASt3R + CUDA 12.8 + Ubuntu 22.04 (RTX 5090 / sm_120)
 # ------------------------------------------------------------
 ARG UBUNTU_VERSION=22.04
->>>>>>> 7c9cdce (feat: add new 3d mapping frameworks)
 ARG NVIDIA_CUDA_VERSION=12.8.0
 
 FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
@@ -24,11 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # 1) System deps
 RUN apt-get update && apt-get install -y \
-<<<<<<< HEAD
-    build-essential git cmake ninja-build curl wget \
-=======
     build-essential git cmake ninja-build curl wget vim nano zsh openssh-server \
->>>>>>> 7c9cdce (feat: add new 3d mapping frameworks)
     libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
     python3 python3-pip python3-dev python-is-python3 \
     ffmpeg \
@@ -50,10 +40,7 @@ RUN python3 -m pip install \
     scipy einops trimesh tensorboard \
     "pyglet<2" "huggingface-hub[torch]>=0.22" \
     scikit-learn roma \
-<<<<<<< HEAD
-=======
     "gradio<6" \
->>>>>>> 7c9cdce (feat: add new 3d mapping frameworks)
     tqdm
 
 # Build curope extension (part of dust3r)
@@ -71,15 +58,11 @@ RUN python3 -m pip install -r dust3r/requirements.txt
 
 # 4) Runtime setup
 WORKDIR /workspace
-<<<<<<< HEAD
-ENV PYTHONPATH="${PYTHONPATH}:/tmp_build/mast3r"
-=======
 ENV PYTHONPATH="/tmp_build/mast3r:${PYTHONPATH}"
 
 COPY run.sh /workspace/run.sh
 COPY run_mast3r_sliding.py /workspace/run_mast3r_sliding.py
 COPY run_custom.sh /workspace/run_custom.sh
 RUN chmod +x /workspace/run.sh /workspace/run_custom.sh
->>>>>>> 7c9cdce (feat: add new 3d mapping frameworks)
 
 CMD ["/bin/bash"]
