@@ -12,10 +12,13 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
       - DISPLAY=${DISPLAY}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - XDG_CACHE_HOME=/workspace/cache
     volumes:
-      - ../../FastVGGT:/workspace/FastVGGT
       - ../datasets:/workspace/datasets
       - ../output:/workspace/output
+      - ../thirdparty:/workspace/thirdparty
+      - ../cache:/workspace/cache
+      - .:/workspace/fastvggt_context
       - /tmp/.X11-unix:/tmp/.X11-unix
     command: tail -f /dev/null
     deploy:

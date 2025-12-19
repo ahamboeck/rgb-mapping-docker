@@ -16,9 +16,13 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - GRADIO_SERVER_NAME=0.0.0.0
       - GRADIO_SERVER_PORT=7860
+      - XDG_CACHE_HOME=/workspace/cache
     volumes:
       - ../datasets:/workspace/datasets
       - ../output:/workspace/output
+      - ../thirdparty:/workspace/thirdparty
+      - ../cache:/workspace/cache
+      - .:/workspace/vggt_slam_context
       - /tmp/.X11-unix:/tmp/.X11-unix
     working_dir: /workspace/VGGT-SLAM
     command: tail -f /dev/null

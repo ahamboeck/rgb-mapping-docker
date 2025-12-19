@@ -15,10 +15,13 @@ services:
       - QT_XCB_GL_INTEGRATION=xcb_glx
       # Prevent shared memory issues with X11
       - QT_X11_NO_MITSHM=1
+      - XDG_CACHE_HOME=/workspace/cache
     volumes:
       - ../datasets:/workspace/datasets
       - ../thirdparty:/workspace/thirdparty
       - ../output:/workspace/output
+      - ../cache:/workspace/cache
+      - .:/workspace/colmap_context
       - /tmp/.X11-unix:/tmp/.X11-unix
     command: tail -f /dev/null
     deploy:

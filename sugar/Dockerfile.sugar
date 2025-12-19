@@ -50,11 +50,7 @@ RUN python3 -m pip install --no-build-isolation .
 
 # B. simple-knn (PATCHED)
 WORKDIR /workspace/SuGaR/gaussian_splatting/submodules/simple-knn
-<<<<<<< HEAD
-# --- THE FIX: Inject <cfloat> to define FLT_MAX ---
-=======
 # Fix FLT_MAX undefined error in CUDA 12.8
->>>>>>> 7c9cdce (feat: add new 3d mapping frameworks)
 RUN sed -i '1i #include <cfloat>' simple_knn.cu
 RUN python3 -m pip install --no-build-isolation .
 

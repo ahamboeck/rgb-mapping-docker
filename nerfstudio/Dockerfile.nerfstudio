@@ -1,0 +1,71 @@
+# -----------------------------------------------------------------------
+# Dockerfile.nerfstudio
+# Custom build for RTX 5090 using local source code
+# Base: Ubuntu 22.04 + CUDA 12.8
+# -----------------------------------------------------------------------
+
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# 1. Install system tools and Python
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    cmake \
+    curl \
+    vim \
+    python3 \
+    python3-pip \
+    python3-dev \
+    ninja-build \
+    colmap \
+    ffmpeg \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Upgrade pip and set python alias
+RUN ln -s /usr/bin/python3 /usr/bin/python && \
+    pip install --upgrade pip
+
+# 3. Install PyTorch (Nightly for CUDA 12.8)
+RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# 4. Set Compilation Flags for RTX 5090
+# We target '90' (Hopper) as a fallback because '120' (Blackwell) 
+# support in tiny-cuda-nn is experimental. 90 works perfectly.
+ENV TCNN_CUDA_ARCHITECTURES=90
+ENV TORCH_CUDA_ARCH_LIST="9.0"
+
+# 5. Install tiny-cuda-nn
+# This is required for the optimized backend.
+# We install it from source to ensure it compiles with the correct CUDA architecture.
+RUN pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch --no-build-isolation
+
+# 6. Clone and Install Nerfstudio
+WORKDIR /workspace
+# Clone the official nerfstudio repository
+RUN git clone https://github.com/nerfstudio-project/nerfstudio.git
+
+WORKDIR /workspace/nerfstudio
+# Install dependencies and the package in editable mode
+# This triggers compilation of tiny-cuda-nn and other extensions
+RUN pip install -e .
+
+# 7. Fix gsplat for RTX 5090
+# Uninstall the version installed by nerfstudio dependencies
+RUN pip uninstall -y gsplat
+
+WORKDIR /workspace
+# Clone gsplat, checkout v1.4.0, and build with correct flags
+RUN git clone https://github.com/nerfstudio-project/gsplat.git && \
+    cd gsplat && \
+    git checkout v1.4.0 && \
+    git submodule update --init --recursive && \
+    export TORCH_CUDA_ARCH_LIST="9.0+PTX" && \
+    pip install . --no-build-isolation -v
+
+# 8. Set default directory
+WORKDIR /workspace/nerfstudio

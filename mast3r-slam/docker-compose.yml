@@ -19,12 +19,13 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - FORCE_CUDA=1
       - TORCH_CUDA_ARCH_LIST=8.6;8.9;9.0;12.0+PTX
+      - XDG_CACHE_HOME=/workspace/cache
     volumes:
-      - ../../MASt3R-SLAM:/workspace/MASt3R-SLAM
-      - ./scripts:/workspace/scripts
       - ../datasets:/workspace/datasets
       - ../output:/workspace/output
       - ../thirdparty:/workspace/thirdparty
+      - ../cache:/workspace/cache
+      - .:/workspace/mast3r_slam_context
       - /tmp/.X11-unix:/tmp/.X11-unix
     command: tail -f /dev/null
     deploy:

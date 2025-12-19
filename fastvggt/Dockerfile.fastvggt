@@ -34,9 +34,11 @@ RUN pip install --upgrade pip
 # Install PyTorch nightly for CUDA 12.8 (RTX 5090 support)
 RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 
-# Install dependencies
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+# Clone and Install FastVGGT
+WORKDIR /workspace
+RUN git clone https://github.com/mystorm16/FastVGGT
+WORKDIR /workspace/FastVGGT
+RUN pip install -r requirements.txt
 
 # Configure evo to use Agg backend (headless) to avoid tkinter issues
 RUN evo_config set plot_backend Agg
@@ -45,9 +47,6 @@ RUN evo_config set plot_backend Agg
 COPY run_custom.sh /workspace/run_custom.sh
 RUN chmod +x /workspace/run_custom.sh
 
-# Install Oh My Zsh
-RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-
 WORKDIR /workspace
 
-CMD ["/bin/zsh"]
+CMD ["tail", "-f", "/dev/null"]
