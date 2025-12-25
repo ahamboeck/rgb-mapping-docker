@@ -1,0 +1,74 @@
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+
+# For NVIDIA RTX 5090 (Blackwell)
+ENV TORCH_CUDA_ARCH_LIST="10.0"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential cmake git curl wget unzip \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    ca-certificates \
+    libopencv-dev \
+    libgl1-mesa-glx \
+    python3 python3-pip python3-dev \
+    vim nano \
+    && rm -rf /var/lib/apt/lists/*
+
+# Symlink python
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+
+# Clone VGGT-Long repository
+WORKDIR /workspace/
+RUN git clone https://github.com/DengKaiCQ/VGGT-Long.git
+WORKDIR /workspace/VGGT-Long
+
+# Make download script executable
+RUN chmod +x scripts/download_weights.sh
+
+# Install requirements first
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Fix Torch and Xformers (reinstall with correct CUDA version)
+RUN pip uninstall -y torch torchvision xformers && \
+    pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu128 && \
+    pip install -v -U git+https://github.com/facebookresearch/xformers.git@v0.0.33#egg=xformers
+
+# Install other dependencies
+RUN pip install ninja setuptools wheel && \
+    pip install opencv-python pypose trimesh matplotlib && \
+    pip install numpy==1.26.1 \
+    Pillow \
+    "huggingface_hub==0.33.5" \
+    einops \
+    safetensors \
+    onnxruntime \
+    pyparsing \
+    importlib_metadata \
+    faiss-gpu \
+    pandas \
+    prettytable \
+    pytorch-lightning \
+    pytorch-metric-learning \
+    torchmetrics
+
+# Install the package
+RUN python setup.py install
+
+# Build DBoW2
+WORKDIR /workspace/VGGT-Long/DBoW2
+RUN mkdir -p build
+WORKDIR /workspace/VGGT-Long/DBoW2/build 
+RUN cmake .. && make && make install
+
+# Install DPRetrieval
+WORKDIR /workspace/VGGT-Long
+RUN pip install ./DPRetrieval
+
+CMD ["/bin/bash"]

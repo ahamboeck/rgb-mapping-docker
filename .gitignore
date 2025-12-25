@@ -1,8 +1,6 @@
 /datasets/*
 /thirdparty/*
-<<<<<<< HEAD
-*.ply
-=======
+/cache/*
 /output/*
 *.ply
 *.glb
@@ -10,4 +8,6 @@
 *.jpg
 *.jpeg
 *.png
->>>>>>> ec4479f (feat: update gitignore)
+*.h5
+*.pt
+__pycache__/
