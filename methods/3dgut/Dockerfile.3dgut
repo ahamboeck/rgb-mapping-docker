@@ -1,0 +1,55 @@
+# ------------------------------------------------------------
+# 3DGUT + CUDA 12.8 + Ubuntu 22.04
+# ------------------------------------------------------------
+ARG UBUNTU_VERSION=22.04
+ARG NVIDIA_CUDA_VERSION=12.8.0
+
+FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/root/miniconda3/bin:${PATH}"
+
+# 1) System deps
+RUN apt-get update && apt-get install -y \
+    git wget curl vim build-essential \
+    libgl1-mesa-glx libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2) Install Miniforge (Avoids Anaconda TOS issues)
+RUN wget \
+    https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+    && mkdir /root/.conda \
+    && bash Miniforge3-Linux-x86_64.sh -b -p /root/miniconda3 \
+    && rm -f Miniforge3-Linux-x86_64.sh \
+    && conda init bash
+
+# 3) Clone 3DGUT
+WORKDIR /workspace
+RUN git clone --recursive https://github.com/nv-tlabs/3dgrut.git
+
+# 4) Install Environment
+WORKDIR /workspace/3dgrut
+RUN chmod +x install_env.sh
+
+# Force CUDA_VERSION to 12.8.1 to satisfy install_env.sh check
+ENV CUDA_VERSION=12.8.1
+
+# Patch install_env.sh to use --no-build-isolation for requirements.txt to fix fused-ssim build
+RUN sed -i 's/pip install -r requirements.txt/pip install --no-build-isolation -r requirements.txt/' install_env.sh
+
+# We run install_env.sh. If it fails, we might need to debug.
+# Assuming it uses 'conda' command which is in PATH.
+RUN ./install_env.sh 3dgrut
+
+# 5) Install GCC 11 if needed (as per instructions for newer systems, but good to have)
+# We use shell to activate conda env and install
+RUN /bin/bash -c "source /root/miniconda3/etc/profile.d/conda.sh && \
+    conda activate 3dgrut && \
+    conda install -c conda-forge gcc=11 gxx=11"
+
+# 6) Runtime setup
+WORKDIR /workspace
+COPY scripts/run.sh /workspace/run.sh
+RUN chmod +x /workspace/run.sh
+
+CMD ["tail", "-f", "/dev/null"]

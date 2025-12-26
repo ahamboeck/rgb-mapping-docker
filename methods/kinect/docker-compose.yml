@@ -1,0 +1,25 @@
+services:
+  kinect:
+    build:
+      context: .
+      dockerfile: Dockerfile.kinect
+    image: kinect_recorder
+    container_name: kinect_recorder_container
+    privileged: true
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_XCB_GL_INTEGRATION=xcb_glx
+      - QT_X11_NO_MITSHM=1
+      - XDG_CACHE_HOME=/workspace/cache
+    volumes:
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ../../datasets:/workspace/datasets
+      - ../../output:/workspace/output
+      - ../../thirdparty:/workspace/thirdparty
+      - ../../cache:/workspace/cache
+      - ./scripts:/workspace/scripts
+    stdin_open: true
+    tty: true
+    command: /bin/bash

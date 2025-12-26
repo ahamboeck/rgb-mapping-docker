@@ -1,0 +1,62 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    vim \
+    git \
+    gnupg \
+    software-properties-common \
+    python3 \
+    python3-pip \
+    python3-dev \
+    build-essential \
+    g++ \
+    libgl1 \
+    libglib2.0-0 \
+    usbutils \
+    udev \
+    debconf-utils \
+    libxcursor1 \
+    libxinerama1 \
+    libxrandr2 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp/k4a-install
+
+RUN wget http://archive.ubuntu.com/ubuntu/pool/universe/libs/libsoundio/libsoundio1_1.1.0-1_amd64.deb && \
+    wget https://packages.microsoft.com/ubuntu/18.04/prod/pool/main/libk/libk4a1.4/libk4a1.4_1.4.1_amd64.deb && \
+    wget https://packages.microsoft.com/ubuntu/18.04/prod/pool/main/libk/libk4a1.4-dev/libk4a1.4-dev_1.4.1_amd64.deb && \
+    wget https://packages.microsoft.com/ubuntu/18.04/prod/pool/main/k/k4a-tools/k4a-tools_1.4.1_amd64.deb && \
+    \
+    # >>> FIXED EULA HASH HERE <<<
+    echo 'libk4a1.4 libk4a1.4/accepted-eula-hash string 0f5d5c5de396e4fee4c0753a21fee0c1ed726cf0316204edda484f08cb266d76' | debconf-set-selections && \
+    echo 'libk4a1.4 libk4a1.4/accept-eula boolean true' | debconf-set-selections && \
+    echo 'libk4a1.4-dev libk4a1.4-dev/accepted-eula-hash string 0f5d5c5de396e4fee4c0753a21fee0c1ed726cf0316204edda484f08cb266d76' | debconf-set-selections && \
+    echo 'libk4a1.4-dev libk4a1.4-dev/accept-eula boolean true' | debconf-set-selections && \
+    \
+    apt-get update && \
+    apt-get install -y \
+        ./libsoundio1_1.1.0-1_amd64.deb \
+        ./libk4a1.4_1.4.1_amd64.deb \
+        ./libk4a1.4-dev_1.4.1_amd64.deb \
+        ./k4a-tools_1.4.1_amd64.deb && \
+    rm -rf /var/lib/apt/lists/* /tmp/k4a-install
+
+# Install Python dependencies AFTER k4a SDK
+# Use --ignore-installed to avoid conflicts with system packages (like blinker)
+RUN pip3 install --ignore-installed open3d opencv-python numpy
+RUN pip3 install --no-cache-dir pyk4a
+
+WORKDIR /workspace
+
+COPY scripts /workspace/scripts
+
+# Compile the C++ IMU extractor tool
+RUN g++ /workspace/scripts/extract_imu.cpp -o /workspace/scripts/extract_imu -lk4a -lk4arecord
+
+CMD ["/bin/bash"]
