@@ -2,7 +2,7 @@
 # 3DGUT + CUDA 12.8 + Ubuntu 22.04
 # ------------------------------------------------------------
 ARG UBUNTU_VERSION=22.04
-ARG NVIDIA_CUDA_VERSION=12.8.0
+ARG NVIDIA_CUDA_VERSION=12.8.1
 
 FROM nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 
@@ -25,17 +25,13 @@ RUN wget \
 
 # 3) Clone 3DGUT
 WORKDIR /workspace
-RUN git clone --recursive https://github.com/nv-tlabs/3dgrut.git
-
-# 4) Install Environment
+# We use this fork since it seems to work with blackwell (RTX 5090), we use the branch
+RUN git clone --recursive -b fix/blackwell-architecture https://github.com/ahamboeck/3dgrut
 WORKDIR /workspace/3dgrut
 RUN chmod +x install_env.sh
 
 # Force CUDA_VERSION to 12.8.1 to satisfy install_env.sh check
 ENV CUDA_VERSION=12.8.1
-
-# Patch install_env.sh to use --no-build-isolation for requirements.txt to fix fused-ssim build
-RUN sed -i 's/pip install -r requirements.txt/pip install --no-build-isolation -r requirements.txt/' install_env.sh
 
 # We run install_env.sh. If it fails, we might need to debug.
 # Assuming it uses 'conda' command which is in PATH.

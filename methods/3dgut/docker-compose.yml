@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile.3dgut
     image: vision_lab/3dgut:cuda12.8-5090
     container_name: 3dgut_5090
+    shm_size: 32gb
     runtime: nvidia
     network_mode: host
     environment:
