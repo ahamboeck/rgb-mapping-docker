@@ -60,9 +60,9 @@ RUN python3 -m pip install -r dust3r/requirements.txt
 WORKDIR /workspace
 ENV PYTHONPATH="/tmp_build/mast3r:${PYTHONPATH}"
 
-COPY run.sh /workspace/run.sh
-COPY run_mast3r_sliding.py /workspace/run_mast3r_sliding.py
-COPY run_custom.sh /workspace/run_custom.sh
+COPY ./scripts/run.sh /workspace/run.sh
+COPY ./scripts/run_mast3r_sliding.py /workspace/run_mast3r_sliding.py
+COPY ./scripts/run_custom.sh /workspace/run_custom.sh
 RUN chmod +x /workspace/run.sh /workspace/run_custom.sh
 
 CMD ["/bin/bash"]
