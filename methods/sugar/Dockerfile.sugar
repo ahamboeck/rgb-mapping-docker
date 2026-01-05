@@ -68,7 +68,7 @@ RUN mkdir -p output
 # This allows loading checkpoints containing numpy arrays
 RUN find . -type f -name "*.py" -print0 | xargs -0 sed -i 's/torch.load(\([^)]*\))/torch.load(\1, weights_only=False)/g'
 
-COPY run_sugar.sh /usr/local/bin/run_sugar
+COPY ./scripts/run_sugar.sh /usr/local/bin/run_sugar
 RUN chmod +x /usr/local/bin/run_sugar
 
 CMD ["tail", "-f", "/dev/null"]

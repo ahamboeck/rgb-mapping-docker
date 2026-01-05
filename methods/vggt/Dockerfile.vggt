@@ -47,8 +47,8 @@ RUN python3 -m pip install -r requirements_demo.txt
 WORKDIR /workspace
 ENV PYTHONPATH="${PYTHONPATH}:/tmp_build/vggt"
 
-COPY scripts/run.sh /workspace/run.sh
-COPY run_chunks.py /workspace/run_chunks.py
+COPY ./scripts/run.sh /workspace/run.sh
+COPY ./scripts/run_chunks.py /workspace/run_chunks.py
 RUN chmod +x /workspace/run.sh
 
 CMD ["/bin/bash"]

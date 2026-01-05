@@ -59,7 +59,7 @@ ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0;12.0"
 ENV FORCE_CUDA="1"
 
 # Create a run script or entrypoint if needed
-COPY run.sh /workspace/run.sh
+COPY ./scripts/run.sh /workspace/run.sh
 RUN chmod +x /workspace/run.sh
 
 CMD ["/bin/bash"]
