@@ -1,390 +1,225 @@
 #!/usr/bin/env python3
-# Example usage (your dataset):
-#
-#   python3 /workspace/scripts/run_mapanything_inference.py \
-#     --input_dir /workspace/datasets/biomasse_2/rosbags/timestamp_filtered_my_run_20260113_163102_extracted/rgb_every_10_subset_first_50/ \
-#     --output_dir /workspace/output/mapanything/biomasse_every_10_subset_first_50 \
-#     --device cuda \
-#     --resize_long 1024 \
-#     --amp
-#
-# Notes:
-# - MapAnything’s public repo is primarily Gradio-first; the exact Python/CLI inference API
-#   can differ by commit. This script is robust:
-#     1) Try in-process Python inference if a predictor API is discoverable
-#     2) Otherwise, try to call a repo CLI script (infer.py / inference.py / demo.py) if present
-# - Output is always:
-#     output_dir/
-#       run_info.json
-#       manifest.json
-#       <image_stem>/input_preview.jpg
-#       <image_stem>/result.json (python backend) OR cli_run.json (cli backend)
-#
-# If you want specific artifacts (masks/depth/etc) written as PNGs, tell me which ones
-# MapAnything produces in your checkout and I’ll wire them explicitly.
+"""
+Example usage:
 
-from __future__ import annotations
+python run_mapanything_inference.py \
+  --input_dir  /path/to/images/ \
+  --output_dir /path/to/output \
+  --model_name facebook/map-anything \
+  --conf_percentile 10 \
+  --max_points 1000000
+"""
 
 import os
-import sys
 import re
-import json
-import time
-import glob
-import shutil
 import argparse
-import subprocess
-from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple
+import yaml
+from pathlib import Path
 
-import cv2
+import numpy as np
+import torch
+from scipy.spatial.transform import Rotation as R
 
-# ------------------------------------------------------------
-# 1) ENV / PATH RESOLUTION (matches your container)
-# ------------------------------------------------------------
-MAPANYTHING_ROOT = os.environ.get("MAPANYTHING_ROOT", "/tmp_build/map-anything")
-
-if os.path.isdir(MAPANYTHING_ROOT) and MAPANYTHING_ROOT not in sys.path:
-    sys.path.insert(0, MAPANYTHING_ROOT)
-
-IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
-
+from mapanything.models import MapAnything
+from mapanything.utils.image import load_images
 
 # ------------------------------------------------------------
-# 2) UTILITIES
+# 1) TIMESTAMP + IO UTILS
 # ------------------------------------------------------------
-def list_images(input_dir: str) -> List[str]:
-    paths: List[str] = []
-    for ext in IMG_EXTS:
-        paths.extend(glob.glob(os.path.join(input_dir, f"*{ext}")))
-        paths.extend(glob.glob(os.path.join(input_dir, f"*{ext.upper()}")))
-    return sorted(set(paths))
-
-
-def extract_timestamp_from_name(path: str) -> float:
-    nums = re.findall(r"\d+", os.path.basename(path))
-    if not nums:
+def extract_timestamp_from_filename(path: str) -> float:
+    matches = re.findall(r"\d+", Path(path).name)
+    if not matches:
+        # Fallback to index if no digits found
         return 0.0
-    ts = max(nums, key=len)
-    try:
-        return float(ts)
-    except Exception:
-        return 0.0
+    return float(max(matches, key=len))
 
 
-def imread_rgb(path: str):
-    bgr = cv2.imread(path, cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise RuntimeError(f"Failed to read image: {path}")
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+def write_ply_xyzrgb_ascii(path: str, xyz: np.ndarray, rgb: np.ndarray) -> None:
+    """Minimal ASCII PLY writer for XYZ + RGB (uchar)."""
+    xyz = np.asarray(xyz, dtype=np.float32)
+    rgb = np.asarray(rgb, dtype=np.uint8)
+
+    header = "\n".join([
+        "ply",
+        "format ascii 1.0",
+        f"element vertex {xyz.shape[0]}",
+        "property float x",
+        "property float y",
+        "property float z",
+        "property uchar red",
+        "property uchar green",
+        "property uchar blue",
+        "end_header",
+    ])
+
+    with open(path, "w") as f:
+        f.write(header + "\n")
+        for (x, y, z), (r, g, b) in zip(xyz, rgb):
+            f.write(f"{x:.6f} {y:.6f} {z:.6f} {int(r)} {int(g)} {int(b)}\n")
 
 
-def resize_long_side(rgb, long_side: Optional[int]):
-    if not long_side:
-        return rgb
-    h, w = rgb.shape[:2]
-    cur = max(h, w)
-    if cur <= long_side:
-        return rgb
-    scale = long_side / float(cur)
-    nh, nw = int(round(h * scale)), int(round(w * scale))
-    return cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_AREA)
+def export_tum_trajectory(
+    tum_path: str,
+    camera_poses_c2w: np.ndarray,
+    frame_paths: list[str],
+) -> None:
+    """Exports poses to TUM format (timestamp x y z qx qy qz qw)."""
+    lines = []
+    for i, c2w in enumerate(camera_poses_c2w):
+        ts = extract_timestamp_from_filename(frame_paths[i])
+        t = c2w[:3, 3]
+        qx, qy, qz, qw = R.from_matrix(c2w[:3, :3]).as_quat()
+        lines.append(f"{ts:.6f} {t[0]:.6f} {t[1]:.6f} {t[2]:.6f} {qx:.6f} {qy:.6f} {qz:.6f} {qw:.6f}")
 
-
-def ensure_empty_dir(path: str, clobber: bool):
-    if os.path.exists(path):
-        if not clobber:
-            raise RuntimeError(
-                f"Output dir exists: {path}\nUse --clobber to overwrite."
-            )
-        shutil.rmtree(path)
-    os.makedirs(path, exist_ok=True)
-
-
-def run(cmd: List[str], cwd: Optional[str] = None) -> Tuple[int, str]:
-    p = subprocess.Popen(
-        cmd,
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    out_lines: List[str] = []
-    assert p.stdout is not None
-    for line in p.stdout:
-        out_lines.append(line)
-    rc = p.wait()
-    return rc, "".join(out_lines)
+    lines.sort(key=lambda s: float(s.split()[0]))
+    with open(tum_path, "w") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 # ------------------------------------------------------------
-# 3) BACKEND DISCOVERY / EXECUTION
+# 2) MERGE UTILS
 # ------------------------------------------------------------
-@dataclass
-class Backend:
-    name: str
-    kind: str  # "python" or "cli"
-    detail: str
+def merge_points_from_preds(
+    predictions,
+    conf_thresh: float | None,
+    conf_percentile: float | None,
+    max_points: int | None,
+    seed: int = 0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Merges per-view pts3d and img_no_norm into a single colored cloud."""
+    all_pts = []
+    all_rgb = []
+    rng = np.random.default_rng(seed)
 
+    for pred in predictions:
+        # pts3d: (B, H, W, 3) -> (H*W, 3)
+        pts = pred["pts3d"].detach().float().cpu().numpy().reshape(-1, 3)
+        # img_no_norm: (B, H, W, 3) -> (H*W, 3)
+        rgb = pred["img_no_norm"].detach().float().cpu().numpy().reshape(-1, 3)
+        # conf: (B, H, W) -> (H*W,)
+        conf = pred["conf"].detach().float().cpu().numpy().reshape(-1)
+        
+        # Apply Confidence Filtering
+        if conf_percentile is not None:
+            thr = np.percentile(conf, conf_percentile)
+            mask = conf >= thr
+        elif conf_thresh is not None:
+            mask = conf >= conf_thresh
+        else:
+            mask = np.ones_like(conf, dtype=bool)
 
-def discover_backends() -> List[Backend]:
-    backends: List[Backend] = []
+        # Apply Validity Mask (from model)
+        if "mask" in pred:
+            v_mask = pred["mask"].detach().float().cpu().numpy().reshape(-1) > 0.5
+            mask = mask & v_mask
 
-    # A) In-process python modules (commit-dependent)
-    python_candidates = [
-        "map_anything",
-        "map_anything.inference",
-        "map_anything.predictor",
-        "map_anything.api",
-        "map_anything.demo",
-    ]
-    for mod in python_candidates:
-        try:
-            __import__(mod)
-            backends.append(Backend(name=f"py:{mod}", kind="python", detail=f"import {mod}"))
-        except Exception:
-            pass
+        pts = pts[mask]
+        rgb = rgb[mask]
 
-    # B) Repo CLI scripts (commit-dependent)
-    scripts_dir = os.path.join(MAPANYTHING_ROOT, "scripts")
-    for fname in ("infer.py", "inference.py", "demo.py"):
-        p = os.path.join(scripts_dir, fname)
-        if os.path.isfile(p):
-            backends.append(Backend(name=f"cli:{fname}", kind="cli", detail=p))
+        # Clean NaNs
+        good = np.isfinite(pts).all(axis=1)
+        all_pts.append(pts[good])
+        all_rgb.append(rgb[good])
 
-    # Info-only: gradio exists but we don't use it for batch
-    if os.path.isfile(os.path.join(scripts_dir, "gradio_app.py")):
-        backends.append(Backend(name="info:gradio_app", kind="cli", detail="scripts/gradio_app.py (interactive)"))
+    pts_final = np.concatenate(all_pts, axis=0)
+    rgb_final = np.concatenate(all_rgb, axis=0)
 
-    return backends
+    # Convert RGB [0, 1] or [0, 255] to uint8 safely
+    if rgb_final.max() <= 1.01:
+        rgb_final = (np.clip(rgb_final, 0, 1) * 255).astype(np.uint8)
+    else:
+        rgb_final = np.clip(rgb_final, 0, 255).astype(np.uint8)
 
+    # Subsample if needed
+    if max_points and pts_final.shape[0] > max_points:
+        idx = rng.choice(pts_final.shape[0], size=max_points, replace=False)
+        pts_final = pts_final[idx]
+        rgb_final = rgb_final[idx]
 
-def _to_jsonable(x):
-    try:
-        import numpy as np
-        import torch
-    except Exception:
-        np = None
-        torch = None
-
-    if x is None:
-        return None
-    if isinstance(x, (str, int, float, bool)):
-        return x
-    if isinstance(x, dict):
-        return {str(k): _to_jsonable(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple)):
-        return [_to_jsonable(v) for v in x]
-    if np is not None and isinstance(x, np.ndarray):
-        if x.size <= 2048:
-            return x.tolist()
-        return {"_type": "ndarray", "shape": list(x.shape), "dtype": str(x.dtype)}
-    if torch is not None and isinstance(x, torch.Tensor):
-        if x.numel() <= 2048:
-            return x.detach().cpu().tolist()
-        return {"_type": "tensor", "shape": list(x.shape), "dtype": str(x.dtype)}
-    return {"_type": "unknown", "repr": repr(x)}
-
-
-def try_inprocess_infer(rgb, device: str, amp: bool) -> Dict:
-    import torch
-
-    probes = [
-        ("map_anything", ["Predictor", "MapAnythingPredictor", "predict", "infer", "run_inference"]),
-        ("map_anything.inference", ["Predictor", "predict", "infer", "run_inference"]),
-        ("map_anything.predictor", ["Predictor", "MapAnythingPredictor", "predict"]),
-        ("map_anything.api", ["predict", "infer"]),
-        ("map_anything.demo", ["predict", "infer"]),
-    ]
-
-    last_err = None
-    for modname, attrs in probes:
-        try:
-            mod = __import__(modname, fromlist=["*"])
-        except Exception as e:
-            last_err = e
-            continue
-
-        for attr in attrs:
-            if not hasattr(mod, attr):
-                continue
-            obj = getattr(mod, attr)
-
-            try:
-                if isinstance(obj, type):
-                    init_vars = getattr(obj.__init__, "__code__", None)
-                    if init_vars and "device" in init_vars.co_varnames:
-                        predictor = obj(device=device)
-                    else:
-                        predictor = obj()
-                    fn = predictor.predict if hasattr(predictor, "predict") else predictor
-                else:
-                    fn = obj
-
-                with torch.inference_mode():
-                    if amp and device.startswith("cuda"):
-                        ctx = torch.autocast(device_type="cuda", dtype=torch.float16)
-                    else:
-                        class _NullCtx:
-                            def __enter__(self): return None
-                            def __exit__(self, *a): return False
-                        ctx = _NullCtx()
-
-                    with ctx:
-                        try:
-                            out = fn(rgb, device=device)
-                        except TypeError:
-                            try:
-                                out = fn(rgb)
-                            except TypeError:
-                                out = fn(image=rgb)
-
-                return {
-                    "backend": f"py:{modname}.{attr}",
-                    "raw_type": str(type(out)),
-                    "result": _to_jsonable(out),
-                }
-            except Exception as e:
-                last_err = e
-                continue
-
-    raise RuntimeError(
-        "No stable in-process inference API found in this MapAnything checkout.\n"
-        f"Last error: {last_err}"
-    )
-
-
-def try_cli_infer_single(image_path: str, out_dir: str, device: str, amp: bool) -> Dict:
-    scripts_dir = os.path.join(MAPANYTHING_ROOT, "scripts")
-    candidates = [os.path.join(scripts_dir, f) for f in ("infer.py", "inference.py", "demo.py")]
-    candidates = [c for c in candidates if os.path.isfile(c)]
-
-    if not candidates:
-        raise RuntimeError(f"No CLI inference scripts found under: {scripts_dir}")
-
-    attempts: List[Tuple[List[str], str]] = []
-    logs: List[str] = []
-
-    for script in candidates:
-        # Common-ish argument layouts
-        attempts.append((
-            ["python3", script, "--input", image_path, "--output", out_dir, "--device", device] + (["--amp"] if amp else []),
-            f"{os.path.basename(script)} --input/--output"
-        ))
-        attempts.append((
-            ["python3", script, "--image", image_path, "--outdir", out_dir, "--device", device] + (["--amp"] if amp else []),
-            f"{os.path.basename(script)} --image/--outdir"
-        ))
-        attempts.append((
-            ["python3", script, image_path, "--outdir", out_dir, "--device", device] + (["--amp"] if amp else []),
-            f"{os.path.basename(script)} positional + --outdir"
-        ))
-
-    for cmd, label in attempts:
-        rc, out = run(cmd, cwd=MAPANYTHING_ROOT)
-        logs.append(f"\n--- Attempt: {label}\nCMD: {' '.join(cmd)}\nRC: {rc}\n{out}")
-        if rc == 0:
-            return {"backend": f"cli:{label}", "cmd": cmd, "log_tail": out[-2000:]}
-
-    raise RuntimeError("All CLI attempts failed.\n" + "\n".join(logs[-3:]))
+    return pts_final, rgb_final
 
 
 # ------------------------------------------------------------
-# 4) MAIN
+# 3) MAIN
 # ------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="MapAnything batch inference (folder -> outputs + manifest)")
-    parser.add_argument("--input_dir", type=str, required=True, help="Folder containing images")
-    parser.add_argument("--output_dir", type=str, required=True, help="Folder to save results")
-    parser.add_argument("--device", type=str, default="cuda", help="cuda or cpu")
-    parser.add_argument("--resize_long", type=int, default=0, help="If >0: downscale so long side <= this")
-    parser.add_argument("--amp", action="store_true", help="Use autocast on CUDA to reduce memory")
-    parser.add_argument("--clobber", action="store_true", help="Delete output_dir if it exists")
-    parser.add_argument("--prefer", type=str, default="python", choices=["python", "cli"], help="Preferred backend")
+    parser = argparse.ArgumentParser("MapAnything -> colored PLY + TUM trajectory")
+    parser.add_argument("--input_dir", required=True, help="Folder of images")
+    parser.add_argument("--output_dir", required=True, help="Where to write outputs")
+    parser.add_argument("--model_name", default="facebook/map-anything", help="Model ID")
+    parser.add_argument("--conf_thresh", type=float, default=None, help="Absolute confidence threshold")
+    parser.add_argument("--conf_percentile", type=float, default=10, help="Percentile to drop (default 10)")
+    parser.add_argument("--max_points", type=int, default=2_000_000, help="Max points in final PLY")
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
-    ensure_empty_dir(args.output_dir, args.clobber)
+    # Environment & Device
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    images = list_images(args.input_dir)
-    if len(images) < 1:
-        raise SystemExit(f"No images found in {args.input_dir}")
+    # 1. Load Model
+    print(f"--> [Model] Loading {args.model_name} on {device}...")
+    model = MapAnything.from_pretrained(args.model_name).to(device)
 
-    backends = discover_backends()
+    # 2. Load Images
+    print(f"--> [Input] Loading images from {args.input_dir}...")
+    views = load_images(args.input_dir)
+    # We need the paths for timestamping later
+    frame_paths = [str(p) for p in sorted(Path(args.input_dir).iterdir()) if p.suffix.lower() in {'.jpg', '.png', '.jpeg'}]
 
-    run_info = {
-        "time_unix": time.time(),
-        "input_dir": args.input_dir,
-        "output_dir": args.output_dir,
-        "device": args.device,
-        "resize_long": args.resize_long,
-        "amp": bool(args.amp),
-        "mapanything_root": MAPANYTHING_ROOT,
-        "discovered_backends": [b.__dict__ for b in backends],
-    }
-    with open(os.path.join(args.output_dir, "run_info.json"), "w") as f:
-        json.dump(run_info, f, indent=2)
+    # 3. Inference
+    print("--> [Inference] Running MapAnything...")
+    with torch.no_grad():
+        predictions = model.infer(
+            views,
+            memory_efficient_inference=False,
+            use_amp=True,
+            amp_dtype="bf16",
+            apply_mask=True,
+            mask_edges=True
+        )
 
-    manifest: List[Dict] = []
-    failures: List[Dict] = []
+    # 4. Export Point Cloud
+    print("--> [PointCloud] Merging and filtering points...")
+    pts, rgb = merge_points_from_preds(
+        predictions,
+        conf_thresh=args.conf_thresh,
+        conf_percentile=args.conf_percentile,
+        max_points=args.max_points,
+        seed=args.seed
+    )
 
-    use_python_first = (args.prefer == "python")
+    ply_path = os.path.join(args.output_dir, "reconstruction.ply")
+    write_ply_xyzrgb_ascii(ply_path, pts, rgb)
+    print(f"--> [Output] Saved PLY: {ply_path} (N={len(pts)})")
 
-    for idx, path in enumerate(images):
-        stem = os.path.splitext(os.path.basename(path))[0]
-        item_out = os.path.join(args.output_dir, stem)
-        os.makedirs(item_out, exist_ok=True)
+    # 5. Export Camera Data
+    print("--> [Cameras] Exporting poses and intrinsics...")
+    all_c2w = []
+    all_intrinsics = []
+    
+    for pred in predictions:
+        # MapAnything returns (B, 4, 4) or (B, 3, 3)
+        all_c2w.append(pred["camera_poses"].detach().float().cpu().numpy()[0])
+        all_intrinsics.append(pred["intrinsics"].detach().float().cpu().numpy()[0])
 
-        rec = {
-            "index": idx,
-            "path": path,
-            "timestamp": extract_timestamp_from_name(path),
-            "output_dir": item_out,
-        }
+    c2w_np = np.stack(all_c2w)
+    int_np = np.stack(all_intrinsics)
 
-        try:
-            if use_python_first:
-                rgb = imread_rgb(path)
-                rgb = resize_long_side(rgb, args.resize_long if args.resize_long > 0 else None)
+    # TUM Trajectory
+    tum_path = os.path.join(args.output_dir, "trajectory_tum.txt")
+    export_tum_trajectory(tum_path, c2w_np, frame_paths)
+    
+    # Raw Numpy Exports
+    np.save(os.path.join(args.output_dir, "camera_poses_c2w.npy"), c2w_np)
+    np.save(os.path.join(args.output_dir, "intrinsics.npy"), int_np)
 
-                # save preview always
-                preview_path = os.path.join(item_out, "input_preview.jpg")
-                cv2.imwrite(preview_path, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+    # Config Dump
+    with open(os.path.join(args.output_dir, "config.yaml"), "w") as f:
+        yaml.safe_dump(vars(args), f)
 
-                result = try_inprocess_infer(rgb, device=args.device, amp=args.amp)
-                with open(os.path.join(item_out, "result.json"), "w") as f:
-                    json.dump(result, f, indent=2)
-
-                rec.update({"ok": True, "backend": result.get("backend", "python"), "result": "result.json"})
-            else:
-                result = try_cli_infer_single(path, item_out, device=args.device, amp=args.amp)
-                with open(os.path.join(item_out, "cli_run.json"), "w") as f:
-                    json.dump(result, f, indent=2)
-
-                rec.update({"ok": True, "backend": result.get("backend", "cli"), "cli_run": "cli_run.json"})
-
-        except Exception as e:
-            rec.update({"ok": False, "error": str(e)})
-            failures.append(rec)
-
-        manifest.append(rec)
-
-        if (idx + 1) % 10 == 0 or (idx + 1) == len(images):
-            print(f"[{idx+1}/{len(images)}] processed")
-
-    with open(os.path.join(args.output_dir, "manifest.json"), "w") as f:
-        json.dump(manifest, f, indent=2)
-
-    ok = sum(1 for m in manifest if m.get("ok"))
-    bad = len(manifest) - ok
-    print(f"\nDone. OK={ok} FAIL={bad}")
-    print(f"Manifest: {os.path.join(args.output_dir, 'manifest.json')}")
-
-    if bad:
-        with open(os.path.join(args.output_dir, "failures.json"), "w") as f:
-            json.dump(failures, f, indent=2)
-        print(f"Failures: {os.path.join(args.output_dir, 'failures.json')}")
-
+    print(f"--> [Success] Done. Outputs in {args.output_dir}")
 
 if __name__ == "__main__":
     main()
