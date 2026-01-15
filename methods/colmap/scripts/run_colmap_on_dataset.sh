@@ -2,7 +2,7 @@
 
 # Check if both path and camera model are provided
 if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Usage: ./run_colmap.sh /path/to/dataset CAMERA_MODEL"
+    echo "Usage: ./run_colmap_on_dataset.sh /path/to/dataset CAMERA_MODEL"
     echo "Common models: SIMPLE_PINHOLE, PINHOLE, SIMPLE_RADIAL, RADIAL, OPENCV"
     exit 1
 fi
